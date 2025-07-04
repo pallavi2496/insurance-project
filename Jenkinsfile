@@ -1,48 +1,55 @@
-node{
-    
-    def mavenHome
-    def mavenCMD
-    def docker
-    def dockerCMD
-    def tagName
-    
-    stage('prepare enviroment'){
-        echo 'initialize all the variables'
-        mavenHome = tool name: 'maven' , type: 'maven'
-        mavenCMD = "${mavenHome}/bin/mvn"
-        docker = tool name: 'docker' , type: 'org.jenkinsci.plugins.docker.commons.tools.DockerTool'
-        dockerCMD = "${docker}/bin/docker"
-        tagName="3.0"
-    }
-    
-    stage('git code checkout'){
-        try{
-            echo 'checkout the code from git repository'
-            git 'https://github.com/shubhamkushwah123/star-agile-insurance-project.git'
+pipeline {
+
+    agent { label 'slave1' }
+
+	environment {	
+		DOCKERHUB_CREDENTIALS=credentials('dockerloginid3')
+	}
+	
+    stages {
+        stage('SCM_Checkout') {
+            steps {
+                echo 'Perform SCM Checkout'
+				git 'https://github.com/pallavi2496/insurance-project.git'
+            }
         }
-        catch(Exception e){
-            echo 'Exception occured in Git Code Checkout Stage'
-            currentBuild.result = "FAILURE"
-            emailext body: '''Dear All,
-            The Jenkins job ${JOB_NAME} has been failed. Request you to please have a look at it immediately by clicking on the below link. 
-            ${BUILD_URL}''', subject: 'Job ${JOB_NAME} ${BUILD_NUMBER} is failed', to: 'shubham@gmail.com'
+        stage('Application Build') {
+            steps {
+                echo 'Perform Application Build'
+				sh 'mvn clean package'
+				
+            }
+        }
+        stage('Docker Build') {
+            steps {
+                echo 'Perform Docker Build'
+				sh "docker build -t pallavi2320/insurance-app-img:${BUILD_NUMBER} ."
+			    sh "docker tag pallavi2320/insurance-app-img:${BUILD_NUMBER} pallavi2320/insurance-app-img:latest"
+				sh 'docker image list'
+            }
+        }
+        stage('Login to Dockerhub') {
+            steps {
+                echo 'Login to DockerHub'				
+				sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u pallavi2320 --password-stdin'
+                
+            }
+        }
+        stage('Publish the Image to Dockerhub') {
+            steps {
+                echo 'Publish to DockerHub'
+				sh "docker push pallavi2320/insurance-app-img:latest"                
+            }
+        }
+        stage('Deploy to Kubernetes Cluster') {
+            steps {
+				script {
+		     		sshPublisher(publishers: [sshPublisherDesc(configName: 'Kubernetes_Master1', transfers: [sshTransfer(cleanRemote: false, excludes: '', execCommand: 'kubectl apply -f kubernetesdeploy.yaml', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '.', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '*.yaml')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+		    	}				          
+            }
         }
     }
-    
-    stage('Build the Application'){
-        echo "Cleaning... Compiling...Testing... Packaging..."
-        //sh 'mvn clean package'
-        sh "${mavenCMD} clean package"        
-    }
-    
-    stage('publish test reports'){
-        publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: false, reportDir: '/var/lib/jenkins/workspace/Capstone-Project-Live-Demo/target/surefire-reports', reportFiles: 'index.html', reportName: 'HTML Report', reportTitles: '', useWrapperFileDirectly: true])
-    }
-    
-    stage('Containerize the application'){
-        echo 'Creating Docker image'
-        sh "${dockerCMD} build -t shubhamkushwah123/insure-me:${tagName} ."
-    }
+}			
     
     stage('Pushing it ot the DockerHub'){
         echo 'Pushing the docker image to DockerHub'
